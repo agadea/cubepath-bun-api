@@ -19,6 +19,8 @@ export async function handleChat(req: Request): Promise<Response> {
     const stream = await openrouter.chat.send({
       model: "openrouter/free",
       messages,
+      // include chatGenerationParams to satisfy SDK validation
+      chatGenerationParams: {},
       stream: true,
     });
 

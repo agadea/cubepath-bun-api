@@ -36,8 +36,10 @@ function sseEncode(text: string) {
 async function streamAsyncIterable(result: AsyncIterable<any>, controller: ReadableStreamDefaultController) {
   for await (const chunk of result) {
     const content = chunk?.choices?.[0]?.delta?.content ?? chunk?.choices?.[0]?.message?.content;
-    if (content) controller.enqueue(sseEncode(String(content)));
-    if (chunk?.usage) controller.enqueue(sseEncode(`[usage] reasoningTokens:${chunk.usage.reasoningTokens}`));
+    if (content) {
+      const payload = { text: String(content), usage: chunk?.usage ?? null };
+      controller.enqueue(sseEncode(JSON.stringify(payload)));
+    }
   }
 }
 
@@ -46,9 +48,12 @@ async function streamReader(result: { getReader: () => any }, controller: Readab
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (typeof value === "string") controller.enqueue(sseEncode(value));
-    else if (value instanceof Uint8Array) controller.enqueue(value);
-    else controller.enqueue(sseEncode(String(value)));
+    let chunkStr: string;
+    if (typeof value === "string") chunkStr = value;
+    else if (value instanceof Uint8Array) chunkStr = new TextDecoder().decode(value);
+    else chunkStr = String(value);
+    const payload = { text: chunkStr };
+    controller.enqueue(sseEncode(JSON.stringify(payload)));
   }
 }
 

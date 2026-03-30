@@ -1,18 +1,19 @@
 import { handleChat } from "./handlers/chat";
 import fs from "fs/promises";
+import path from "path";
 import ejs from "ejs";
 // ejs does not ship TypeScript types here; tests and build use ts-jest which tolerates this.
 
 let _cachedPicoCss: string | null = null;
 async function getPicoCss(): Promise<string> {
   if (_cachedPicoCss) return _cachedPicoCss;
-  const cssPath = new URL("../node_modules/@picocss/pico/css/pico.min.css", import.meta.url).pathname;
+  const cssPath = path.join(process.cwd(), "node_modules", "@picocss", "pico", "css", "pico.min.css");
   _cachedPicoCss = await fs.readFile(cssPath, "utf8");
   return _cachedPicoCss;
 }
 
 export async function renderChatPage(): Promise<Response> {
-  const viewPath = new URL("../views/chat.ejs", import.meta.url).pathname;
+  const viewPath = path.join(process.cwd(), "views", "chat.ejs");
   const html = await new Promise<string>((resolve, reject) => {
     ejs.renderFile(viewPath, {}, {}, (err: any, str: any) => {
       if (err) reject(err);

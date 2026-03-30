@@ -19,6 +19,7 @@ function buildRequestPayload(messages: Message[]) {
   } as any;
 }
 
+
 function isAsyncIterable(obj: any): obj is AsyncIterable<any> {
   return obj && typeof obj[Symbol.asyncIterator] === "function";
 }
@@ -27,23 +28,27 @@ function isReadableStreamLike(obj: any): obj is { getReader: () => any } {
   return obj && typeof obj.getReader === "function";
 }
 
+function sseEncode(text: string) {
+  const first = `data: ${String(text).replace(/\r/g, "").replace(/\n/g, "\ndata: ")}`;
+  return new TextEncoder().encode(first + "\n\n");
+}
+
 async function streamAsyncIterable(result: AsyncIterable<any>, controller: ReadableStreamDefaultController) {
-  const encoder = new TextEncoder();
   for await (const chunk of result) {
     const content = chunk?.choices?.[0]?.delta?.content ?? chunk?.choices?.[0]?.message?.content;
-    if (content) controller.enqueue(encoder.encode(String(content)));
-    if (chunk?.usage) controller.enqueue(encoder.encode(`\n[usage] reasoningTokens:${chunk.usage.reasoningTokens}\n`));
+    if (content) controller.enqueue(sseEncode(String(content)));
+    if (chunk?.usage) controller.enqueue(sseEncode(`[usage] reasoningTokens:${chunk.usage.reasoningTokens}`));
   }
 }
 
 async function streamReader(result: { getReader: () => any }, controller: ReadableStreamDefaultController) {
-  const encoder = new TextEncoder();
   const reader = result.getReader();
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (typeof value === "string") controller.enqueue(encoder.encode(value));
-    else controller.enqueue(value);
+    if (typeof value === "string") controller.enqueue(sseEncode(value));
+    else if (value instanceof Uint8Array) controller.enqueue(value);
+    else controller.enqueue(sseEncode(String(value)));
   }
 }
 
@@ -88,25 +93,30 @@ export async function handleChat(req: Request): Promise<Response> {
         try {
           if (isAsyncIterable(result)) {
             await streamAsyncIterable(result, controller);
-            return;
-          }
-
-          if (isReadableStreamLike(result)) {
+          } else if (isReadableStreamLike(result)) {
             await streamReader(result, controller);
-            return;
+          } else {
+            const text = serializeResult(result);
+            controller.enqueue(sseEncode(text));
           }
-
-          const text = serializeResult(result);
-          controller.enqueue(new TextEncoder().encode(text));
+          // send done event
+          controller.enqueue(sseEncode(JSON.stringify({ done: true })));
         } catch (err) {
-          controller.error(err as any);
+          controller.enqueue(sseEncode(JSON.stringify({ error: String(err) })));
         } finally {
           controller.close();
         }
       },
     });
 
-    return new Response(streamBody, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    return new Response(streamBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (err: any) {
     const message = err?.message ?? String(err);
     return new Response(`Upstream error: ${message}`, { status: 502 });

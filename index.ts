@@ -1,5 +1,7 @@
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+
 Bun.serve({
-	port: 3000,
+	port: PORT,
 	fetch(req) {
 		const url = new URL(req.url);
 		if (url.pathname === "/health") {
@@ -12,4 +14,4 @@ Bun.serve({
 	},
 });
 
-console.log("Server running on http://localhost:3000");
+console.log(`Server running on http://localhost:${PORT}`);

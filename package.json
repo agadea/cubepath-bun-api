@@ -1,4 +1,4 @@
-++{
+{
   "name": "cubepath-bun-api",
   "module": "index.ts",
   "type": "module",

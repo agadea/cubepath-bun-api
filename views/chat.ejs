@@ -10,16 +10,18 @@
 <body>
   <main class="container">
     <h1>Chat SSE</h1>
-    <form id="chat-form">
-      <label for="prompt">Message</label>
-      <textarea id="prompt" name="prompt" rows="3" placeholder="Type your message..."></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button type="submit">Send</button>
-        <button type="button" id="cancel-btn" style="display:none;">Cancel</button>
-      </div>
-    </form>
+    <div class="chat-panel">
+      <div id="messages" class="messages" role="log" aria-live="polite"></div>
 
-    <div id="messages" class="messages" role="log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <label for="prompt">Message</label>
+        <textarea id="prompt" name="prompt" rows="3" placeholder="Type your message..."></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button type="submit">Send</button>
+          <button type="button" id="cancel-btn" style="display:none;">Cancel</button>
+        </div>
+      </form>
+    </div>
   </main>
 
   <script type="module">

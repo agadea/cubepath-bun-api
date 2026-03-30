@@ -178,15 +178,27 @@ export function attachChatClient() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
+  let isSending = false;
   async function doSend() {
+    const sendBtn = form.querySelector('button[type="submit"]');
+    if (isSending || (sendBtn && sendBtn.disabled)) return;
+
     const prompt = textarea.value || '';
     if (!prompt.trim()) return;
-    // Create UI entries
-    appendUserMessage(messages, prompt);
-    const assistantEl = createAssistantPlaceholder(messages);
 
+    // Prevent duplicate sends immediately and update UI
+    isSending = true;
     setSendingState(form, true);
     cancelBtn.style.display = 'inline-block';
+
+    // Capture text and clear input immediately to avoid accidental duplicate sends
+    const textToSend = prompt;
+    textarea.value = '';
+    textarea.focus();
+
+    // Create UI entries
+    appendUserMessage(messages, textToSend);
+    const assistantEl = createAssistantPlaceholder(messages);
 
     const controller = createAbortController();
 
@@ -194,7 +206,7 @@ export function attachChatClient() {
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
+        body: JSON.stringify({ messages: [{ role: 'user', content: textToSend }] }),
         signal: controller.signal,
       });
 
@@ -211,10 +223,10 @@ export function attachChatClient() {
     } catch (err) {
       assistantEl.querySelector('.msg__body').textContent = '[Error] ' + String(err);
     } finally {
+      isSending = false;
       setSendingState(form, false);
       cancelBtn.style.display = 'none';
       abortCurrentRequest();
-      textarea.value = '';
       textarea.focus();
     }
   }

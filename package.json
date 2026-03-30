@@ -3,7 +3,13 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "dependencies": {
+    "@openrouter/sdk": "^0.10.2",
+    "dotenv": "^17.3.1"
+  },
   "scripts": {
+    "start": "bun index.ts",
+    "dev": "bun index.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint . --ext .ts",

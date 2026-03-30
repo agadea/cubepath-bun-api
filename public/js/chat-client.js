@@ -1,11 +1,56 @@
-// Minimal client-side chat helpers for incremental SSE rendering
-// This file is written in plain JS to avoid build steps and is testable with jsdom.
+// Spanish-localized chat client with simple Markdown rendering,
+// toggle send/cancel behavior, auto-scroll, and innerHTML rendering.
+//
+// Exports: createMessageElement, appendUserMessage, createAssistantPlaceholder,
+// parseSSEChunks, handleResponseStream, handleKeydown, attachChatClient
 
-/** Create a message bubble element.
- * role: 'user' | 'assistant'
- * text: initial text
- * meta: optional object { name, ts }
- */
+export function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function renderMarkdown(raw) {
+  if (raw == null) return '';
+  let text = String(raw);
+
+  // Extract fenced code blocks first to avoid inner replacements
+  const blocks = [];
+  text = text.replace(/```([\s\S]*?)```/g, (m, code) => {
+    const id = `___CODE_BLOCK_${blocks.length}___`;
+    blocks.push(code);
+    return id;
+  });
+
+  // Escape the main body
+  text = escapeHtml(text);
+
+  // Inline code
+  text = text.replace(/`([^`]+)`/g, (m, code) => `<code>${escapeHtml(code)}</code>`);
+
+  // Links [text](url)
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+  });
+
+  // Bold **text**
+  text = text.replace(/\*\*([^*]+)\*\*/g, (m, t) => `<strong>${t}</strong>`);
+
+  // Italic *text*
+  text = text.replace(/\*([^*]+)\*/g, (m, t) => `<em>${t}</em>`);
+
+  // Restore code blocks (escaped)
+  text = text.replace(/___CODE_BLOCK_(\d+)___/g, (m, idx) => {
+    const code = blocks[Number(idx)] || '';
+    return `<pre><code>${escapeHtml(code)}</code></pre>`;
+  });
+
+  return text;
+}
+
 export function createMessageElement(role, text, meta = {}) {
   const wrapper = document.createElement('div');
   wrapper.className = `msg msg--${role}`;
@@ -18,7 +63,7 @@ export function createMessageElement(role, text, meta = {}) {
 
   const nameSpan = document.createElement('span');
   nameSpan.className = 'msg__name';
-  nameSpan.textContent = meta.name ?? (role === 'user' ? 'You' : 'Assistant');
+  nameSpan.textContent = meta.name ?? (role === 'user' ? 'Tú' : 'Asistente');
 
   const tsSpan = document.createElement('span');
   tsSpan.className = 'msg__ts';
@@ -29,33 +74,34 @@ export function createMessageElement(role, text, meta = {}) {
 
   const body = document.createElement('div');
   body.className = 'msg__body';
-  body.textContent = text || '';
+  body.innerHTML = renderMarkdown(text ?? '');
 
   wrapper.appendChild(metaEl);
   wrapper.appendChild(body);
   return wrapper;
 }
 
-/** Append a user message to container and return the element */
 export function appendUserMessage(container, text) {
   const el = createMessageElement('user', text, { ts: new Date().toLocaleTimeString() });
   container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
+  try {
+    container.scrollTop = container.scrollHeight;
+  } catch (e) {}
   return el;
 }
 
-/** Create an assistant placeholder element to be updated incrementally */
 export function createAssistantPlaceholder(container) {
   const el = createMessageElement('assistant', '', { ts: new Date().toLocaleTimeString() });
   el.classList.add('placeholder');
+  // ensure body is empty HTML so incremental rendering uses innerHTML
+  el.querySelector('.msg__body').innerHTML = '';
   container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
+  try {
+    container.scrollTop = container.scrollHeight;
+  } catch (e) {}
   return el;
 }
 
-/** Parse SSE-style chunks from an accumulator and a new chunk string.
- * Returns { events: Array<any>, remainder: string }
- */
 export function parseSSEChunks(acc, chunk) {
   const combined = acc + chunk;
   const parts = combined.split('\n\n');
@@ -77,12 +123,25 @@ export function parseSSEChunks(acc, chunk) {
   return { events, remainder };
 }
 
-/** Handle a response stream reader (object with async read() method) and update assistant element.
- * reader.read() should return { done, value } where value may be Uint8Array or string.
- * onDone() is called when stream finishes or hits done event.
- */
+let _currentAbortController = null;
+
+export function createAbortController() {
+  if (typeof AbortController !== 'undefined') {
+    _currentAbortController = new AbortController();
+    return _currentAbortController;
+  }
+  _currentAbortController = { abort() {} };
+  return _currentAbortController;
+}
+
+export function abortCurrentRequest() {
+  if (_currentAbortController) {
+    try { _currentAbortController.abort(); } catch (e) {}
+    _currentAbortController = null;
+  }
+}
+
 export async function handleResponseStream(reader, assistantEl, onDone = () => {}) {
-  // TextDecoder may be missing in some test environments; fall back to util.TextDecoder
   const _TextDecoder = typeof TextDecoder !== 'undefined' ? TextDecoder : (typeof require !== 'undefined' ? require('util').TextDecoder : null);
   const decoder = _TextDecoder ? new _TextDecoder() : { decode: (v) => (typeof v === 'string' ? v : new TextDecoder().decode(v)) };
   let buf = '';
@@ -94,17 +153,13 @@ export async function handleResponseStream(reader, assistantEl, onDone = () => {
       if (typeof value === 'string') chunkStr = value;
       else if (value instanceof Uint8Array) chunkStr = decoder.decode(value);
       else chunkStr = String(value);
-      try { console.error('chat-client:chunkStr', chunkStr); } catch (e) {}
       const { events, remainder } = parseSSEChunks(buf, chunkStr);
-      try { console.error('chat-client:parsedEvents', events); } catch (e) {}
       buf = remainder;
       for (const ev of events) {
-        // debug: log parsed event (helps while running tests)
-        // eslint-disable-next-line no-console
-        try { console.error('chat-client:ev', ev); } catch (e) {}
         if (ev === null || ev === undefined) continue;
         if (typeof ev === 'object' && ev.error) {
-          assistantEl.querySelector('.msg__body').textContent += '\n[Error] ' + String(ev.error);
+          const body = assistantEl.querySelector('.msg__body');
+          body.innerHTML += `<div class="error">${escapeHtml(String(ev.error))}</div>`;
           onDone();
           return;
         }
@@ -112,53 +167,45 @@ export async function handleResponseStream(reader, assistantEl, onDone = () => {
           onDone();
           return;
         }
-        // append text
         const text = typeof ev === 'string' ? ev : String(ev.text ?? ev);
-        assistantEl.querySelector('.msg__body').textContent += text;
+        const body = assistantEl.querySelector('.msg__body');
+        // Append rendered markdown HTML
+        body.innerHTML += renderMarkdown(text);
+        // Auto-scroll container if present
+        const container = assistantEl.parentElement;
+        if (container) {
+          try { container.scrollTop = container.scrollHeight; } catch (e) {}
+        }
         assistantEl.classList.remove('placeholder');
       }
     }
   } catch (err) {
-    assistantEl.querySelector('.msg__body').textContent += '\n[Error] ' + String(err);
+    const body = assistantEl.querySelector('.msg__body');
+    body.innerHTML += `<div class="error">${escapeHtml(String(err))}</div>`;
   } finally {
     onDone();
   }
 }
 
-// Small helpers for UI state (keep local state)
-let _currentAbortController = null;
-
 export function setSendingState(formEl, isSending) {
-  const btn = formEl.querySelector('button[type="submit"]');
-  if (!btn) return;
-  if (isSending) {
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-  } else {
-    btn.disabled = false;
-    btn.textContent = 'Send';
+  const sendBtn = document.getElementById('send-btn');
+  const cancelBtn = document.getElementById('cancel-btn');
+  if (sendBtn) {
+    if (isSending) {
+      sendBtn.textContent = 'Cancelar';
+      try { sendBtn.type = 'button'; } catch (e) {}
+      sendBtn.setAttribute('aria-busy', 'true');
+    } else {
+      sendBtn.textContent = 'Enviar';
+      try { sendBtn.type = 'submit'; } catch (e) {}
+      sendBtn.removeAttribute('aria-busy');
+    }
+  }
+  if (cancelBtn) {
+    cancelBtn.style.display = isSending ? 'inline-block' : 'none';
   }
 }
 
-export function abortCurrentRequest() {
-  if (_currentAbortController) {
-    try { _currentAbortController.abort(); } catch (e) {}
-    _currentAbortController = null;
-  }
-}
-
-export function createAbortController() {
-  // In browsers, AbortController exists; in tests we can mock simple objects
-  if (typeof AbortController !== 'undefined') {
-    _currentAbortController = new AbortController();
-    return _currentAbortController;
-  }
-  // fallback
-  _currentAbortController = { abort() { } };
-  return _currentAbortController;
-}
-
-/** Handle keydown in textarea: Enter (no Shift) => submitFn, Shift+Enter => newline */
 export function handleKeydown(event, submitFn) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -166,12 +213,12 @@ export function handleKeydown(event, submitFn) {
   }
 }
 
-/** Attach client behavior to DOM: binds form, keydown, send flow, and cancel */
 export function attachChatClient() {
   const form = document.getElementById('chat-form');
   const textarea = document.getElementById('prompt');
   const messages = document.getElementById('messages');
   const cancelBtn = document.getElementById('cancel-btn');
+  const sendBtn = document.getElementById('send-btn');
   if (!form || !textarea || !messages) return;
 
   function formatTs(d = new Date()) {
@@ -180,23 +227,17 @@ export function attachChatClient() {
 
   let isSending = false;
   async function doSend() {
-    const sendBtn = form.querySelector('button[type="submit"]');
-    if (isSending || (sendBtn && sendBtn.disabled)) return;
-
+    if (isSending) return;
     const prompt = textarea.value || '';
     if (!prompt.trim()) return;
 
-    // Prevent duplicate sends immediately and update UI
     isSending = true;
     setSendingState(form, true);
-    cancelBtn.style.display = 'inline-block';
 
-    // Capture text and clear input immediately to avoid accidental duplicate sends
     const textToSend = prompt;
     textarea.value = '';
     textarea.focus();
 
-    // Create UI entries
     appendUserMessage(messages, textToSend);
     const assistantEl = createAssistantPlaceholder(messages);
 
@@ -211,21 +252,20 @@ export function attachChatClient() {
       });
 
       if (!res.ok) {
-        assistantEl.querySelector('.msg__body').textContent = '[Error] ' + res.statusText;
+        assistantEl.querySelector('.msg__body').innerHTML = `<div class="error">${escapeHtml(res.statusText)}</div>`;
         return;
       }
 
       const reader = res.body.getReader();
       await handleResponseStream(reader, assistantEl, () => {
+        isSending = false;
         setSendingState(form, false);
-        cancelBtn.style.display = 'none';
       });
     } catch (err) {
-      assistantEl.querySelector('.msg__body').textContent = '[Error] ' + String(err);
+      assistantEl.querySelector('.msg__body').innerHTML = `<div class="error">${escapeHtml(String(err))}</div>`;
     } finally {
       isSending = false;
       setSendingState(form, false);
-      cancelBtn.style.display = 'none';
       abortCurrentRequest();
       textarea.focus();
     }
@@ -234,16 +274,30 @@ export function attachChatClient() {
   // submit handler
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    doSend();
+    if (!isSending) doSend();
   });
 
-  // keydown for Enter/Shift+Enter
-  textarea.addEventListener('keydown', (ev) => handleKeydown(ev, () => form.requestSubmit()));
+  // keydown for Enter/Shift+Enter (only submit when not sending)
+  textarea.addEventListener('keydown', (ev) => handleKeydown(ev, () => { if (!isSending) form.requestSubmit(); }));
+
+  // send button: when sending, clicking it cancels
+  if (sendBtn) {
+    sendBtn.addEventListener('click', (ev) => {
+      if (isSending) {
+        ev.preventDefault();
+        abortCurrentRequest();
+        isSending = false;
+        setSendingState(form, false);
+      }
+    });
+  }
 
   // cancel button
-  cancelBtn.addEventListener('click', () => {
-    abortCurrentRequest();
-    setSendingState(form, false);
-    cancelBtn.style.display = 'none';
-  });
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      abortCurrentRequest();
+      isSending = false;
+      setSendingState(form, false);
+    });
+  }
 }

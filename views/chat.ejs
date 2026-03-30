@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -10,17 +10,24 @@
 <body>
   <main class="container">
     <h1>Chat SSE</h1>
-    <div class="chat-panel">
-      <div id="messages" class="messages" role="log" aria-live="polite"></div>
 
-      <form id="chat-form" class="chat-form">
-        <label for="prompt">Message</label>
-        <textarea id="prompt" name="prompt" rows="3" placeholder="Type your message..."></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button type="submit">Send</button>
-          <button type="button" id="cancel-btn" style="display:none;">Cancel</button>
+    <div class="chat-grid">
+      <section class="left-col">
+        <div class="chat-panel">
+          <div id="messages" class="messages" role="log" aria-live="polite"></div>
+
+          <form id="chat-form" class="chat-form">
+            <label for="prompt">Mensaje</label>
+            <textarea id="prompt" name="prompt" rows="3" placeholder="Escribe tu mensaje..."></textarea>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button id="send-btn" type="submit">Enviar</button>
+              <button type="button" id="cancel-btn" style="display:none;">Cancelar</button>
+            </div>
+          </form>
         </div>
-      </form>
+      </section>
+
+      <aside class="right-col" aria-hidden="true"><!-- reserved --></aside>
     </div>
   </main>
 

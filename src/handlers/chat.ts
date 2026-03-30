@@ -37,7 +37,7 @@ async function streamAsyncIterable(result: AsyncIterable<any>, controller: Reada
   for await (const chunk of result) {
     const content = chunk?.choices?.[0]?.delta?.content ?? chunk?.choices?.[0]?.message?.content;
     if (content) {
-      const payload = { text: String(content), usage: chunk?.usage ?? null };
+      const payload = { text: String(content), usage: chunk?.usage ?? null, speaker: 'assistant' };
       controller.enqueue(sseEncode(JSON.stringify(payload)));
     }
   }
@@ -52,7 +52,7 @@ async function streamReader(result: { getReader: () => any }, controller: Readab
     if (typeof value === "string") chunkStr = value;
     else if (value instanceof Uint8Array) chunkStr = new TextDecoder().decode(value);
     else chunkStr = String(value);
-    const payload = { text: chunkStr };
+    const payload = { text: chunkStr, speaker: 'assistant' };
     controller.enqueue(sseEncode(JSON.stringify(payload)));
   }
 }

@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/css/pico.min.css" />
+  <link rel="stylesheet" href="/css/chat.css" />
   <title>Chat SSE</title>
 </head>
 <body>
@@ -11,55 +12,19 @@
     <h1>Chat SSE</h1>
     <form id="chat-form">
       <label for="prompt">Message</label>
-      <textarea id="prompt" name="prompt" rows="3"></textarea>
-      <button type="submit">Send</button>
+      <textarea id="prompt" name="prompt" rows="3" placeholder="Type your message..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="submit">Send</button>
+        <button type="button" id="cancel-btn" style="display:none;">Cancel</button>
+      </div>
     </form>
-    <pre id="output" style="white-space:pre-wrap;"></pre>
+
+    <div id="messages" class="messages" role="log" aria-live="polite"></div>
   </main>
 
-  <script>
-  (function(){
-    const form = document.getElementById('chat-form');
-    const out = document.getElementById('output');
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      out.textContent = '';
-      const prompt = document.getElementById('prompt').value || '';
-      const res = await fetch('/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] })
-      });
-      if (!res.ok) {
-        out.textContent = 'Error: ' + res.status;
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      while(true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split('\n\n');
-        buf = parts.pop() || '';
-        for (const part of parts) {
-          const lines = part.split(/\r?\n/);
-          for (const line of lines) {
-            if (line.startsWith('data:')) {
-              const payload = line.slice(5).trim();
-              try {
-                const obj = JSON.parse(payload);
-                if (obj.text) out.textContent += obj.text;
-              } catch (err) {
-                out.textContent += payload;
-              }
-            }
-          }
-        }
-      }
-    });
-  })();
+  <script type="module">
+    import { attachChatClient } from '/js/chat-client.js';
+    attachChatClient();
   </script>
 </body>
 </html>

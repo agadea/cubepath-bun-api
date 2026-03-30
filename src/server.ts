@@ -51,6 +51,23 @@ export function startServer() {
         }
       }
 
+          // Serve static files from /public (js, css, images)
+          if ((url.pathname.startsWith('/js/') || url.pathname.startsWith('/css/') || url.pathname.startsWith('/assets/')) && req.method === 'GET') {
+            try {
+              const filePath = path.join(process.cwd(), 'public', url.pathname.replace(/^\//, ''));
+              const data = await fs.readFile(filePath);
+              const ext = path.extname(filePath).toLowerCase();
+              let contentType = 'application/octet-stream';
+              if (ext === '.js') contentType = 'application/javascript; charset=utf-8';
+              else if (ext === '.css') contentType = 'text/css; charset=utf-8';
+              else if (ext === '.svg') contentType = 'image/svg+xml';
+              else if (ext === '.png') contentType = 'image/png';
+              return new Response(data, { status: 200, headers: { 'Content-Type': contentType } });
+            } catch (err: any) {
+              // fallthrough to 404
+            }
+          }
+
       if (url.pathname === "/chat") {
         return handleChat(req);
       }

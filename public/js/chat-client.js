@@ -12,7 +12,20 @@ export function createMessageElement(role, text, meta = {}) {
 
   const metaEl = document.createElement('div');
   metaEl.className = 'msg__meta';
-  metaEl.textContent = `${meta.name ?? (role === 'user' ? 'You' : 'Assistant')}${meta.ts ? ' • ' + meta.ts : ''}`;
+  const avatar = document.createElement('span');
+  avatar.className = 'msg__avatar';
+  avatar.textContent = meta.avatar ?? (role === 'user' ? '👤' : '🤖');
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'msg__name';
+  nameSpan.textContent = meta.name ?? (role === 'user' ? 'You' : 'Assistant');
+
+  const tsSpan = document.createElement('span');
+  tsSpan.className = 'msg__ts';
+  tsSpan.textContent = meta.ts ? ' • ' + meta.ts : '';
+  metaEl.appendChild(avatar);
+  metaEl.appendChild(nameSpan);
+  metaEl.appendChild(tsSpan);
 
   const body = document.createElement('div');
   body.className = 'msg__body';
@@ -69,7 +82,9 @@ export function parseSSEChunks(acc, chunk) {
  * onDone() is called when stream finishes or hits done event.
  */
 export async function handleResponseStream(reader, assistantEl, onDone = () => {}) {
-  const decoder = new TextDecoder();
+  // TextDecoder may be missing in some test environments; fall back to util.TextDecoder
+  const _TextDecoder = typeof TextDecoder !== 'undefined' ? TextDecoder : (typeof require !== 'undefined' ? require('util').TextDecoder : null);
+  const decoder = _TextDecoder ? new _TextDecoder() : { decode: (v) => (typeof v === 'string' ? v : new TextDecoder().decode(v)) };
   let buf = '';
   try {
     while (true) {
@@ -79,9 +94,14 @@ export async function handleResponseStream(reader, assistantEl, onDone = () => {
       if (typeof value === 'string') chunkStr = value;
       else if (value instanceof Uint8Array) chunkStr = decoder.decode(value);
       else chunkStr = String(value);
+      try { console.error('chat-client:chunkStr', chunkStr); } catch (e) {}
       const { events, remainder } = parseSSEChunks(buf, chunkStr);
+      try { console.error('chat-client:parsedEvents', events); } catch (e) {}
       buf = remainder;
       for (const ev of events) {
+        // debug: log parsed event (helps while running tests)
+        // eslint-disable-next-line no-console
+        try { console.error('chat-client:ev', ev); } catch (e) {}
         if (ev === null || ev === undefined) continue;
         if (typeof ev === 'object' && ev.error) {
           assistantEl.querySelector('.msg__body').textContent += '\n[Error] ' + String(ev.error);
@@ -144,4 +164,74 @@ export function handleKeydown(event, submitFn) {
     event.preventDefault();
     submitFn();
   }
+}
+
+/** Attach client behavior to DOM: binds form, keydown, send flow, and cancel */
+export function attachChatClient() {
+  const form = document.getElementById('chat-form');
+  const textarea = document.getElementById('prompt');
+  const messages = document.getElementById('messages');
+  const cancelBtn = document.getElementById('cancel-btn');
+  if (!form || !textarea || !messages) return;
+
+  function formatTs(d = new Date()) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function doSend() {
+    const prompt = textarea.value || '';
+    if (!prompt.trim()) return;
+    // Create UI entries
+    appendUserMessage(messages, prompt);
+    const assistantEl = createAssistantPlaceholder(messages);
+
+    setSendingState(form, true);
+    cancelBtn.style.display = 'inline-block';
+
+    const controller = createAbortController();
+
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        assistantEl.querySelector('.msg__body').textContent = '[Error] ' + res.statusText;
+        return;
+      }
+
+      const reader = res.body.getReader();
+      await handleResponseStream(reader, assistantEl, () => {
+        setSendingState(form, false);
+        cancelBtn.style.display = 'none';
+      });
+    } catch (err) {
+      assistantEl.querySelector('.msg__body').textContent = '[Error] ' + String(err);
+    } finally {
+      setSendingState(form, false);
+      cancelBtn.style.display = 'none';
+      abortCurrentRequest();
+      textarea.value = '';
+      textarea.focus();
+    }
+  }
+
+  // submit handler
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    doSend();
+  });
+
+  // keydown for Enter/Shift+Enter
+  textarea.addEventListener('keydown', (ev) => handleKeydown(ev, () => form.requestSubmit()));
+
+  // cancel button
+  cancelBtn.addEventListener('click', () => {
+    abortCurrentRequest();
+    setSendingState(form, false);
+    cancelBtn.style.display = 'none';
+  });
 }
